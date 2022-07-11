@@ -7,13 +7,97 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #include "qtnats.h"
 
 #include <nats.h>
+#include <vector>
 
 #include <QThread>
 
-// need to pass it through queued signal-slot connections
-static const int messageTypeId = qRegisterMetaType<QtNats::Message>();
+using namespace QtNats;
 
-QtNats::Message::Message(natsMsg* msg)
+Options::Options()
+{
+    natsOptions_Create(&o);
+}
+Options::~Options()
+{
+    natsOptions_Destroy(o);
+}
+Options& Options::servers(const QUrl& url)
+{
+    QByteArray ba = url.toEncoded();
+    const char* servers[] = { ba.constData(), nullptr };
+    natsOptions_SetServers(o, servers, 1);
+}
+Options& Options::servers(const QList<QUrl>& urls)
+{
+    QList<QByteArray> l;
+    std::vector<const char*> v;
+    for (auto url : urls) {
+        l.append(url.toEncoded());
+        v.push_back(l.last().constData());
+    }
+    natsOptions_SetServers(o, v.data(), v.size());
+}
+Options& Options::userInfo(const QString& user, const QString& password)
+{
+    natsOptions_SetUserInfo(o, qUtf8Printable(user), qUtf8Printable(password));
+}
+Options& Options::token(const QString& token)
+{
+    natsOptions_SetToken(o, qUtf8Printable(token));
+}
+Options& Options::randomize(bool on)
+{
+    natsOptions_SetNoRandomize(o, !on); //NB! reverted flag
+}
+Options& Options::timeout(qint64 ms)
+{
+    natsOptions_SetTimeout(o, ms);
+}
+Options& Options::name(const QString& name)
+{
+    natsOptions_SetName(o, qUtf8Printable(name));
+}
+Options& Options::secure(bool on)
+{
+    natsOptions_SetSecure(o, on);
+}
+Options& Options::verbose(bool on)
+{
+    natsOptions_SetVerbose(o, on);
+}
+Options& Options::pedantic(bool on)
+{
+    natsOptions_SetPedantic(o, on);
+}
+Options& Options::pingInterval(qint64 ms)
+{
+    natsOptions_SetPingInterval(o, ms);
+}
+Options& Options::maxPingsOut(int count)
+{
+    natsOptions_SetMaxPingsOut(o, count);
+}
+Options& Options::allowReconnect(bool on)
+{
+    natsOptions_SetAllowReconnect(o, on);
+}
+Options& Options::maxReconnect(int count)
+{
+    natsOptions_SetMaxReconnect(o, count);
+}
+Options& Options::reconnectWait(qint64 ms)
+{
+    natsOptions_SetReconnectWait(o, ms);
+}
+Options& Options::echo(bool on)
+{
+    natsOptions_SetNoEcho(o, !on);  //NB! reverted flag
+}
+
+// need to pass it through queued signal-slot connections
+static const int messageTypeId = qRegisterMetaType<Message>();
+
+Message::Message(natsMsg* msg)
 {
     m_data = QByteArray (natsMsg_GetData(msg), natsMsg_GetDataLength(msg));
     m_subject = QString::fromLatin1(natsMsg_GetSubject(msg));
@@ -29,34 +113,34 @@ static QString getErrorText(natsStatus status) {
 }
 
 static void subscriptionCallback(natsConnection* /*nc*/, natsSubscription* /*sub*/, natsMsg* msg, void* closure) {
-    QtNats::Subscription* sub = reinterpret_cast<QtNats::Subscription*>(closure);
+    Subscription* sub = reinterpret_cast<Subscription*>(closure);
     
-    QtNats::Message m(msg);
+    Message m(msg);
     natsMsg_Destroy(msg);
     emit sub->received(m);
 }
 
 static void errorHandler(natsConnection* /*nc*/, natsSubscription* /*subscription*/, natsStatus err, void* closure) {
-    QtNats::Connection* c = reinterpret_cast<QtNats::Connection*>(closure);
+    Connection* c = reinterpret_cast<Connection*>(closure);
     emit c->errorOccurred(err, getErrorText(err));
 }
 
 static void closedConnectionHandler(natsConnection* /*nc*/, void *closure) {
-    QtNats::Connection* c = reinterpret_cast<QtNats::Connection*>(closure);
-    emit c->statusChanged(QtNats::Status::Closed);
+    Connection* c = reinterpret_cast<Connection*>(closure);
+    emit c->statusChanged(::Status::Closed);
 }
 
 static void reconnectedHandler(natsConnection* /*nc*/, void *closure) {
-    QtNats::Connection* c = reinterpret_cast<QtNats::Connection*>(closure);
-    emit c->statusChanged(QtNats::Status::Connected);
+    Connection* c = reinterpret_cast<Connection*>(closure);
+    emit c->statusChanged(Status::Connected);
 }
 
 static void disconnectedHandler(natsConnection* /*nc*/, void *closure) {
-    QtNats::Connection* c = reinterpret_cast<QtNats::Connection*>(closure);
-    emit c->statusChanged(QtNats::Status::Reconnecting);
+    ::Connection* c = reinterpret_cast<Connection*>(closure);
+    emit c->statusChanged(Status::Reconnecting);
 }
 
-QtNats::Connection::Connection(QObject* parent):
+Connection::Connection(QObject* parent):
     QObject(parent)
 {
     int cpuCoresCount = QThread::idealThreadCount(); //this function may fail, thus the check
@@ -65,20 +149,20 @@ QtNats::Connection::Connection(QObject* parent):
     }
 }
 
-QtNats::Connection::~Connection() {
+Connection::~Connection() {
     natsConnection_Destroy(nats_conn);
 }
 
-bool QtNats::Connection::connectToServer(const QString& address)
+bool Connection::connectToServer(const QString& address)
 {
-    natsOptions* options = nullptr;
+    
     natsStatus s = NATS_OK;
     //natsOptions* functions almost don't validate their arguments, and mostly handle only NATS_NO_MEMORY
     //so no point in checking natsStatus everywhere
-    natsOptions_Create(&options);
+    
 
-    natsOptions_SetURL(options, qUtf8Printable(address));
-    natsOptions_SetName(options, "QtNats");
+    
+    
     natsOptions_SetErrorHandler(options, &errorHandler, this);
     natsOptions_SetClosedCB(options, &closedConnectionHandler, this);
     natsOptions_SetDisconnectedCB(options, &disconnectedHandler, this);
@@ -88,7 +172,7 @@ bool QtNats::Connection::connectToServer(const QString& address)
     natsOptions_UseGlobalMessageDelivery(options, true);
 
     s = natsConnection_Connect(&nats_conn, options);
-    natsOptions_Destroy(options);
+    
     if (s == NATS_OK)
         return true;
     else {
@@ -97,17 +181,17 @@ bool QtNats::Connection::connectToServer(const QString& address)
     }
 }
 
-bool QtNats::Connection::publish(const QString& subject, const QByteArray& message) {
+bool Connection::publish(const QString& subject, const QByteArray& message) {
     natsStatus s = natsConnection_Publish(nats_conn, qPrintable(subject), message.constData(), message.size());
     return (s == NATS_OK);
 }
 
-bool QtNats::Connection::ping() {
+bool Connection::ping() {
     natsStatus s = natsConnection_FlushTimeout(nats_conn, 10000);
     return (s == NATS_OK);
 }
 
-QString QtNats::Connection::currentServer() const {
+QString Connection::currentServer() const {
     char buffer[500];
     natsStatus s = natsConnection_GetConnectedUrl(nats_conn, buffer, sizeof(buffer));
     if (s != NATS_OK) {
@@ -116,11 +200,11 @@ QString QtNats::Connection::currentServer() const {
     return QString::fromLatin1(buffer);
 }
 
-QtNats::Status QtNats::Connection::status() const {
+::Status Connection::status() const {
     return Status::Closed;
 }
 
-QString QtNats::Connection::lastError() const {
+QString Connection::lastError() const {
     if (nats_conn) {
         const char** buffer = nullptr;
         natsConnection_GetLastError(nats_conn, buffer);
@@ -131,22 +215,22 @@ QString QtNats::Connection::lastError() const {
     }
 }
 
-QtNats::Subscription::Subscription(Connection* connection, const QString& subject,  QObject* parent): QObject(parent)
+Subscription::Subscription(Connection* connection, const QString& subject,  QObject* parent): QObject(parent)
 {
     natsConnection_Subscribe(&nats_sub, connection->nats_conn, qUtf8Printable(subject), &subscriptionCallback, reinterpret_cast<void*>(this));
 }
 
-QtNats::Subscription::Subscription(Connection* connection, const QString& subject, const QString& queueGroup,  QObject* parent): QObject(parent)
+Subscription::Subscription(Connection* connection, const QString& subject, const QString& queueGroup,  QObject* parent): QObject(parent)
 {
     natsConnection_QueueSubscribe(&nats_sub, connection->nats_conn, qUtf8Printable(subject), qUtf8Printable(queueGroup), &subscriptionCallback, reinterpret_cast<void*>(this));
 }
 
-QtNats::Subscription::~Subscription()
+Subscription::~Subscription()
 {
     natsSubscription_Destroy(nats_sub);
 }
 
-bool QtNats::Subscription::isValid() const 
+bool Subscription::isValid() const 
 {
     return natsSubscription_IsValid(nats_sub);
 }

@@ -7,19 +7,21 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #pragma once
 
 #include <memory>
-#include <atomic>
+//#include <atomic>
 // #include <optional>
 
 #include <QObject>
 #include <QByteArray>
-#include <QMutex>
+//#include <QMutex>
 // #include <QRegularExpression>
-#include <QHash>
+//#include <QHash>
 #include <QFuture>
+#include <QUrl>
 
 typedef struct __natsConnection natsConnection;
 typedef struct __natsSubscription natsSubscription;
 typedef struct __natsMsg natsMsg;
+typedef struct __natsOptions natsOptions;
 
 namespace QtNats {
 
@@ -28,6 +30,31 @@ namespace QtNats {
         Closed,
         Connecting,
         Reconnecting
+    };
+
+    class Options {
+        natsOptions* o{ nullptr };
+        friend class Connection;
+
+    public:
+        Options();
+        ~Options();
+        Options& servers(const QUrl& url);
+        Options& servers(const QList<QUrl>& urls);
+        Options& userInfo(const QString& user, const QString& password);
+        Options& token(const QString& token);
+        Options& randomize(bool on);
+        Options& timeout(qint64 ms);
+        Options& name(const QString& name);
+        Options& secure(bool on);
+        Options& verbose(bool on);
+        Options& pedantic(bool on);
+        Options& pingInterval(qint64 ms);
+        Options& maxPingsOut(int count);
+        Options& allowReconnect(bool on);
+        Options& maxReconnect(int count);
+        Options& reconnectWait(qint64 ms);
+        Options& echo(bool on);
     };
 
     class Message {

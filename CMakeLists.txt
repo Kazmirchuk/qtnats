@@ -1,6 +1,3 @@
-# example build command:
-# cmake -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 15 Win64" ..
-
 cmake_minimum_required(VERSION 3.14)
 
 project(QtNats)
