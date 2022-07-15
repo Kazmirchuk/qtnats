@@ -19,7 +19,7 @@ set(FETCHCONTENT_QUIET FALSE)
 FetchContent_Declare(
   cnats
   GIT_REPOSITORY https://github.com/nats-io/nats.c.git
-  GIT_TAG        v3.1.1
+  GIT_TAG        v3.3.0
   GIT_SHALLOW    ON
 )
 
