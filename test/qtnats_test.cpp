@@ -63,8 +63,7 @@ void BasicTestCase::asyncRequest()
         natsCli.waitForStarted();
         QTest::qWait(1000);
         Connection c;
-        auto o = Options().servers(QUrl("nats://localhost:4222")).build();
-        c.connectToServer(o);
+        c.connectToServer(QUrl("nats://localhost:4222"));
         auto future = c.asyncRequest("foo", "bar");
         future.waitForFinished();
         natsCli.close();

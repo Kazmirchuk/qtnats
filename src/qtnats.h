@@ -10,6 +10,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #include <QByteArray>
 #include <QFuture>
 #include <QUrl>
+#include <QMultiHash>
 
 
 // consider moving to PIMPL?
@@ -21,6 +22,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 namespace QtNats {
 
     Q_NAMESPACE
+
+    using MessageHeaders = QMultiHash<QString, QString>;
 
     enum class ConnectionStatus {
         Disconnected = NATS_CONN_STATUS_DISCONNECTED,
@@ -48,51 +51,58 @@ namespace QtNats {
         const natsStatus errorCode = NATS_OK;
     };
 
-    class Options {
-        natsOptions* o { nullptr };
-        friend class Connection;
+    struct Options {
+        QList<QUrl> servers;
+        QString user;
+        QString password;
+        QString token;
+        bool randomize = true; //NB! reverted option
+        qint64 timeout;
+        QString name;
+        bool secure = false;
+        bool verbose = false;
+        bool pedantic = false;
+        qint64 pingInterval;
+        int maxPingsOut;
+        int ioBufferSize;
+        bool allowReconnect = true;
+        int maxReconnect;
+        qint64 reconnectWait;
+        int reconnectBufferSize;
+        int maxPendingMessages;
+        bool echo = true; //NB! reverted option
 
-    public:
         Options();
         ~Options();
-        Options(const Options& other) = delete;//remember to call build()!
-        Options(natsOptions* opts);
 
-        Options& servers(const QUrl& url);
-        Options& servers(const QList<QUrl>& urls);
-        Options& userInfo(const QString& user, const QString& password);
-        Options& token(const QString& token);
-        Options& randomize(bool on);
-        Options& timeout(qint64 ms);
-        Options& name(const QString& name);
-        Options& secure(bool on);
-        Options& verbose(bool on);
-        Options& pedantic(bool on);
-        Options& pingInterval(qint64 ms);
-        Options& maxPingsOut(int count);
-        Options& allowReconnect(bool on);
-        Options& maxReconnect(int count);
-        Options& reconnectWait(qint64 ms);
-        Options& echo(bool on);
-
-        natsOptions* build();
-            
+    private:
+        mutable natsOptions* o = nullptr;
+        natsOptions* build() const;
+        friend class Connection;
     };
 
     class Message {
 
     public:
         Message() {}
-        explicit Message(natsMsg* msg);
+        Message(const QString& subject, const QByteArray& data): m_subject(subject), m_data(data) {}
         QString subject() const { return m_subject; }
         QString reply() const { return m_reply; }
         QByteArray data() const { return m_data; }
+        MessageHeaders headers() const { return m_headers; }
+
+        void setSubject(const QString& s) { m_subject = s; }
+        void setReply(const QString& r) { m_reply = r; }
+        void setData(const QByteArray& d) { m_data = d; }
+        void setHeaders(const MessageHeaders& h) { m_headers = h; }
 
     private:
         QString m_subject;
         QString m_reply;
         QByteArray m_data;
-        //todo headers
+        // NB! 1. headers are case-sensitive
+        // 2. cnats does NOT preserve the order of headers
+        QMultiHash<QString, QString> m_headers;
     };
 
     class Connection : public QObject {
@@ -105,12 +115,13 @@ namespace QtNats {
         Connection(Connection&&) = delete;
         Connection& operator=(Connection&&) = delete;
         
-        void connectToServer(const Options& address);
+        void connectToServer(const Options& opts);
+        void connectToServer(const QUrl& address);
         void close() noexcept;
         
-        void publish(const QString& subject, const QByteArray& message);
+        void publish(const Message& msg);
 
-        Message request(const QString& subject, const QByteArray& message, qint64 timeout = 2000);
+        Message request(const Message& msg, qint64 timeout = 2000);
         QFuture<Message> asyncRequest(const QString& subject, const QByteArray& message, qint64 timeout = 2000);
 
         bool ping(qint64 timeout = 10000); //ms
@@ -119,14 +130,17 @@ namespace QtNats {
         ConnectionStatus status() const;
         QString errorString() const;
 
+        static QString newInbox();
+
     signals:
         void errorOccurred(natsStatus error, const QString& text);
         void statusChanged(ConnectionStatus status);
 
     private:
-        natsConnection* m_conn { nullptr };
+        natsConnection* m_conn = nullptr;
 
         friend class Subscription;
+        friend class JetStream;
     };
     
     class Subscription : public QObject {
@@ -134,14 +148,30 @@ namespace QtNats {
         Q_DISABLE_COPY(Subscription)
 
     public:
-        Subscription(Connection* connection, const QString& subject, QObject* parent = nullptr);
-        Subscription(Connection* connection, const QString& subject, const QString& queueGroup, QObject* parent = nullptr);
+        Subscription(Connection* connection, const QString& subject);
+        Subscription(Connection* connection, const QString& subject, const QString& queueGroup);
         ~Subscription() override;
     signals:
         void received(const Message& message);
 
     private:
-        natsSubscription* m_sub { nullptr };
+        natsSubscription* m_sub = nullptr;
+    };
+
+    // ---------------------------- JET STREAM -------------------------------
+
+    class JetStream : public QObject {
+        Q_OBJECT
+        Q_DISABLE_COPY(JetStream)
+
+    public:
+        JetStream(Connection* natsConn);
+        ~JetStream() noexcept override;
+        JetStream(JetStream&&) = delete;
+        JetStream& operator=(JetStream&&) = delete;
+
+    private:
+        jsCtx* m_jsCtx = nullptr;
     };
 }
 
