@@ -5,6 +5,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 */
 
 #include "qtnats.h"
+#include "qtnats_p.h"
 
 #include <opts.h>
 
@@ -20,7 +21,7 @@ static QString getNatsErrorText(natsStatus status) {
     return QString::fromLatin1(natsStatus_GetText(status));
 }
 
-static void checkError(natsStatus s)
+void QtNats::checkError(natsStatus s)
 {
     if (s == NATS_OK) return;
     throw Exception(s);
@@ -80,8 +81,11 @@ natsOptions* Options::build() const
 // need to pass it through queued signal-slot connections
 static const int messageTypeId = qRegisterMetaType<Message>();
 
-static Message fromNatsMsg(natsMsg* msg) noexcept
+Message QtNats::fromNatsMsg(natsMsg* msg) noexcept
 {
+    // delete natsMsg once we return from the function
+    NatsMsgPtr natsMsgPtr (msg, &natsMsg_Destroy);
+
     QString subj = QString::fromLatin1(natsMsg_GetSubject(msg));
     QByteArray data = QByteArray(natsMsg_GetData(msg), natsMsg_GetDataLength(msg));
     Message m (subj, data);
@@ -117,25 +121,33 @@ static Message fromNatsMsg(natsMsg* msg) noexcept
     return m;
 };
 
-using NatsMsgPtr = std::unique_ptr<natsMsg, decltype(&natsMsg_Destroy)>;
-
-static NatsMsgPtr toNatsMsg(const Message& msg)
+NatsMsgPtr QtNats::toNatsMsg(const Message& msg, const char* reply)
 {
     natsMsg* cnatsMsg;
-    QByteArray data = msg.data();
+    QByteArray data = msg.data(); 
+    //if reply is an empty string, natsMsg_Create returns NATS_INVALID_ARG, so need to be more careful here
+    QByteArray baReply = msg.reply().toLatin1();
+    const char* realReply = nullptr;
+    if (reply) {
+        realReply = reply;
+    }
+    else if (baReply.size()) {
+        realReply = baReply.constData();
+    }
+
     checkError(natsMsg_Create(&cnatsMsg,
         qPrintable(msg.subject()),
-        qPrintable(msg.reply()),
+        realReply,
         data.constData(),
         data.size()
     ));
     
-    auto msgPtr = NatsMsgPtr(cnatsMsg, natsMsg_Destroy);
+    NatsMsgPtr msgPtr(cnatsMsg, &natsMsg_Destroy);
 
     MessageHeaders h = msg.headers();
     auto i = h.constBegin();
     while (i != h.constEnd()) {
-        checkError(natsMsgHeader_Add(cnatsMsg, qPrintable(i.key()), qPrintable(i.value())));
+        checkError(natsMsgHeader_Add(cnatsMsg, qPrintable(i.key()), qUtf8Printable(i.value())));
     }
     return msgPtr;
 }
@@ -144,7 +156,6 @@ static void subscriptionCallback(natsConnection* /*nc*/, natsSubscription* /*sub
     Subscription* sub = reinterpret_cast<Subscription*>(closure);
     
     Message m(fromNatsMsg(msg));
-    natsMsg_Destroy(msg);
     emit sub->received(m);
 }
 
@@ -157,7 +168,6 @@ static void asyncRequestCallback(natsConnection* /*nc*/, natsSubscription* natsS
         }
         else {
             Message m(fromNatsMsg(msg));
-            natsMsg_Destroy(msg);
             future_iface->reportResult(m);
         }
     }
@@ -176,6 +186,7 @@ static void errorHandler(natsConnection* /*nc*/, natsSubscription* /*subscriptio
 
 static void closedConnectionHandler(natsConnection* /*nc*/, void *closure) {
     Connection* c = reinterpret_cast<Connection*>(closure);
+    //can ask for last error here
     emit c->statusChanged(ConnectionStatus::Closed);
 }
 
@@ -217,6 +228,8 @@ void Connection::connectToServer(const Options& opts)
     natsOptions_SetReconnectedCB(nats_opts, &reconnectedHandler, this);
 
     checkError(natsConnection_Connect(&m_conn, nats_opts));
+
+    //TODO handle reopening
 }
 
 void Connection::connectToServer(const QUrl& address)
@@ -251,7 +264,7 @@ Message Connection::request(const Message& msg, qint64 timeout)
     return fromNatsMsg(replyMsg);
 }
 
-QFuture<Message> Connection::asyncRequest(const QString& subject, const QByteArray& message, qint64 timeout)
+QFuture<Message> Connection::asyncRequest(const Message& msg, qint64 timeout)
 {
     // QFutureInterface is undocumented; Qt6 provides QPromise instead
     // based on https://stackoverflow.com/questions/59197694/qt-how-to-create-a-qfuture-from-a-thread
@@ -262,11 +275,28 @@ QFuture<Message> Connection::asyncRequest(const QString& subject, const QByteArr
     // cnats will copy natsInbox, so we can delete it in the end of this function
     checkError(natsConnection_SubscribeTimeout(&subscription, m_conn, inbox.constData(), timeout, &asyncRequestCallback, future_iface.get()));
     checkError(natsSubscription_AutoUnsubscribe(subscription, 1));
-    checkError(natsConnection_PublishRequest(m_conn, qPrintable(subject), inbox.constData(), message.constData(), message.size()));
+    // can't do msg.reply = inbox; publish(msg); because "msg" is constant
+    NatsMsgPtr p = toNatsMsg(msg, inbox.constData());
+    checkError(natsConnection_PublishMsg(m_conn, p.get()));
+
     future_iface->reportStarted();
     auto f = future_iface->future();
     future_iface.release(); //will be deleted in asyncRequestCallback
     return f;
+}
+
+Subscription* Connection::subscribe(const QString& subject)
+{
+    Subscription* sub = new Subscription(this);
+    checkError(natsConnection_Subscribe(&sub->m_sub, m_conn, qPrintable(subject), &subscriptionCallback, this));
+    return sub;
+}
+
+Subscription* Connection::subscribe(const QString& subject, const QString& queueGroup)
+{
+    Subscription* sub = new Subscription(this);
+    checkError(natsConnection_QueueSubscribe(&sub->m_sub, m_conn, qPrintable(subject), qPrintable(queueGroup), &subscriptionCallback, this));
+    return sub;
 }
 
 bool Connection::ping(qint64 timeout) {
@@ -302,16 +332,6 @@ QString Connection::newInbox()
     QString result = QString::fromLatin1(inbox);
     natsInbox_Destroy(inbox);
     return result;
-}
-
-Subscription::Subscription(Connection* connection, const QString& subject): QObject(connection)
-{
-    checkError(natsConnection_Subscribe(&m_sub, connection->m_conn, qPrintable(subject), &subscriptionCallback, this));
-}
-
-Subscription::Subscription(Connection* connection, const QString& subject, const QString& queueGroup): QObject(connection)
-{
-    checkError(natsConnection_QueueSubscribe(&m_sub, connection->m_conn, qPrintable(subject), qPrintable(queueGroup), &subscriptionCallback, this));
 }
 
 Subscription::~Subscription()

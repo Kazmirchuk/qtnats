@@ -25,7 +25,8 @@ namespace QtNats {
 
     using MessageHeaders = QMultiHash<QString, QString>;
 
-    enum class ConnectionStatus {
+    enum class ConnectionStatus
+    {
         Disconnected = NATS_CONN_STATUS_DISCONNECTED,
         Connecting = NATS_CONN_STATUS_CONNECTING,
         Connected = NATS_CONN_STATUS_CONNECTED,
@@ -51,7 +52,18 @@ namespace QtNats {
         const natsStatus errorCode = NATS_OK;
     };
 
-    struct Options {
+    class JetStreamException : public Exception
+    {
+    public:
+        JetStreamException(natsStatus s, jsErrCode js) : Exception(s), jsError(js) {}
+        void raise() const override { throw* this; }
+        JetStreamException* clone() const override { return new JetStreamException(*this); }
+
+        const jsErrCode jsError = jsErrCode(0);
+    };
+
+    struct Options
+    {
         QList<QUrl> servers;
         QString user;
         QString password;
@@ -81,11 +93,13 @@ namespace QtNats {
         friend class Connection;
     };
 
-    class Message {
-
+    // this could be a simple struct, but in future I may need to optimize it to minimize conversions const char* -> QString etc
+    // so keep getters and setters
+    class Message
+    {
     public:
         Message() {}
-        Message(const QString& subject, const QByteArray& data): m_subject(subject), m_data(data) {}
+        Message(const QString& subject, const QByteArray& data) : m_subject(subject), m_data(data) {}
         QString subject() const { return m_subject; }
         QString reply() const { return m_reply; }
         QByteArray data() const { return m_data; }
@@ -102,10 +116,22 @@ namespace QtNats {
         QByteArray m_data;
         // NB! 1. headers are case-sensitive
         // 2. cnats does NOT preserve the order of headers
-        QMultiHash<QString, QString> m_headers;
+        MessageHeaders m_headers;
     };
 
-    class Connection : public QObject {
+    class Subscription;
+    class JetStream;
+    
+    struct JsOptions
+    {
+        // QString prefix = "$JS.API"; don't think it's a good idea to change this?
+        QString domain;
+        qint64 timeout = 5000;
+    };
+
+
+    class Connection : public QObject
+    {
         Q_OBJECT
         Q_DISABLE_COPY(Connection)
         
@@ -122,7 +148,10 @@ namespace QtNats {
         void publish(const Message& msg);
 
         Message request(const Message& msg, qint64 timeout = 2000);
-        QFuture<Message> asyncRequest(const QString& subject, const QByteArray& message, qint64 timeout = 2000);
+        QFuture<Message> asyncRequest(const Message& msg, qint64 timeout = 2000);
+
+        Subscription* subscribe(const QString& subject);
+        Subscription* subscribe(const QString& subject, const QString& queueGroup);
 
         bool ping(qint64 timeout = 10000); //ms
         
@@ -132,47 +161,89 @@ namespace QtNats {
 
         static QString newInbox();
 
+        JetStream* jetStream(const JsOptions& options = JsOptions());
+
     signals:
         void errorOccurred(natsStatus error, const QString& text);
         void statusChanged(ConnectionStatus status);
 
     private:
         natsConnection* m_conn = nullptr;
-
-        friend class Subscription;
-        friend class JetStream;
     };
     
-    class Subscription : public QObject {
+    class Subscription : public QObject
+    {
         Q_OBJECT
         Q_DISABLE_COPY(Subscription)
 
     public:
-        Subscription(Connection* connection, const QString& subject);
-        Subscription(Connection* connection, const QString& subject, const QString& queueGroup);
-        ~Subscription() override;
+        ~Subscription() noexcept override;
+        Subscription(Subscription&&) = delete;
+        Subscription& operator=(Subscription&&) = delete;
+
     signals:
         void received(const Message& message);
 
     private:
+        Subscription(QObject* parent) : QObject(parent) {}
+
         natsSubscription* m_sub = nullptr;
+        friend class Connection;
     };
 
     // ---------------------------- JET STREAM -------------------------------
 
-    class JetStream : public QObject {
+    struct JsPublishOptions
+    {
+        qint64 timeout = -1;
+        QString msgID;
+        QString expectStream;
+        QString expectLastMessageID;
+        quint64 expectLastSequence = 0;
+        quint64 expectLastSubjectSequence = 0;
+        bool expectNoMessage = false;
+    };
+
+    struct JsPublishAck
+    {
+        QString stream;
+        quint64 sequence;
+        QString domain;
+        bool duplicate;
+    };
+
+    class JetStream : public QObject
+    {
         Q_OBJECT
         Q_DISABLE_COPY(JetStream)
 
     public:
-        JetStream(Connection* natsConn);
         ~JetStream() noexcept override;
         JetStream(JetStream&&) = delete;
         JetStream& operator=(JetStream&&) = delete;
 
+        JsPublishAck publish(const Message& msg, const JsPublishOptions& opts);
+        JsPublishAck publish(const Message& msg, qint64 timeout = -1);
+
+        void asyncPublish(const Message& msg, const JsPublishOptions& opts);
+        void asyncPublish(const Message& msg, qint64 timeout = -1);
+        void waitForPublishCompleted(qint64 timeout = -1);
+        
+    signals:
+        void errorOccurred(natsStatus error, jsErrCode jsErr, const QString& text, const Message& msg);
+
     private:
+        JetStream(QObject* parent) : QObject(parent) {}
+
         jsCtx* m_jsCtx = nullptr;
+        
+        JsPublishAck doPublish(const Message& msg, jsPubOptions* opts);
+        void doAsyncPublish(const Message& msg, jsPubOptions* opts);
+
+        friend class Connection;
     };
+
+    
 }
 
 Q_DECLARE_METATYPE(QtNats::Message)

@@ -8,7 +8,7 @@ include(FetchContent)
 set(default_build_type "Release")
 option(QTNATS_BUILD_LIB_STATIC "Build static library" ON) #unused yet
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_AUTOMOC ON)
 

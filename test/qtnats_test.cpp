@@ -37,15 +37,18 @@ private slots:
     void cleanupTestCase();
 
     void asyncRequest();
+    void jsPublish();
 };
 
 void BasicTestCase::initTestCase()
 {
+    QDir::setCurrent("../test"); //default pwd is "build"
+
     connect(&natsServer, &QProcess::stateChanged, [](QProcess::ProcessState newState) {
         cout << "nats-server: " << qPrintable(enumToString(newState)) << endl;
     });
 
-    natsServer.start("nats-server", QStringList());
+    natsServer.start("nats-server", QStringList() << "-js");
     natsServer.waitForStarted();
     QTest::qWait(1000);
 }
@@ -64,7 +67,7 @@ void BasicTestCase::asyncRequest()
         QTest::qWait(1000);
         Connection c;
         c.connectToServer(QUrl("nats://localhost:4222"));
-        auto future = c.asyncRequest("foo", "bar");
+        auto future = c.asyncRequest(Message("foo", "bar"));
         future.waitForFinished();
         natsCli.close();
         natsCli.waitForFinished();
@@ -73,6 +76,62 @@ void BasicTestCase::asyncRequest()
     catch (const QException& e) {
         QFAIL(e.what());
     }
+}
+
+void BasicTestCase::jsPublish()
+{
+    QProcess natsCli;
+    bool streamCreated = false;
+    try {
+        
+        natsCli.start("nats", QStringList() << "stream" << "add" << "--config=stream_config.json");
+        natsCli.waitForFinished();
+
+        streamCreated = true;
+
+        // I need a consumer too to avoid the "no responders" error
+        // trying to use a json config leads to: Consumer creation failed: consumer in pull mode requires ack policy (10084)
+        natsCli.start("nats", QStringList() << "consumer" << "add"
+            << "--ack=explicit"
+            << "--deliver=all"
+            << "--max-pending=100"
+            << "--max-deliver=-1"
+            << "--replay=instant"
+            << "--pull"
+            << "--wait=1s"
+            << "MY_STREAM" << "MY_CONSUMER");
+        natsCli.waitForFinished();
+
+        Connection c;
+        c.connectToServer(QUrl("nats://localhost:4222"));
+        
+        auto js = c.jetStream();
+
+        connect(js, &JetStream::errorOccurred, [](natsStatus error, jsErrCode jsErr, const QString& text, const Message& msg) {
+            cout << "JS error: " << qPrintable(text) << endl;
+        });
+
+        auto ack = js->publish(Message("test.1", "HI"));
+
+        QCOMPARE(ack.stream, QString("MY_STREAM"));
+        QCOMPARE(ack.sequence, 1);
+
+        for (int i = 0; i < 5; i++) {
+            js->asyncPublish(Message("test.2", "HI"), 1000);
+        }
+        js->waitForPublishCompleted();
+        QTest::qWait(1000);
+    }
+    catch (const QException& e) {
+        QFAIL(e.what());
+    }
+
+    if (streamCreated) {
+        natsCli.start("nats", QStringList() << "stream" << "rm" << "-f" << "MY_STREAM");
+        natsCli.waitForFinished();
+    }
+
+    
 }
 
 QTEST_GUILESS_MAIN(BasicTestCase)
