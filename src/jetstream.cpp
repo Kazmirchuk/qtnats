@@ -37,6 +37,35 @@ JetStream* Connection::jetStream(const JsOptions& options)
     return js;
 }
 
+void Message::ack()
+{
+    jsErrCode jsErr;
+    natsStatus s = natsMsg_AckSync(m_natsMsg.get(), nullptr, &jsErr);
+    checkJsError(s, jsErr);
+}
+
+void Message::nack(qint64 delay)
+{
+    natsStatus s;
+    if (delay == -1) {
+        s = natsMsg_Nak(m_natsMsg.get(), nullptr);
+    }
+    else {
+        s = natsMsg_NakWithDelay(m_natsMsg.get(), delay, nullptr);
+    }
+    checkError(s);
+}
+
+void Message::inProgress()
+{
+    checkError(natsMsg_InProgress(m_natsMsg.get(), nullptr));
+}
+
+void Message::terminate()
+{
+    checkError(natsMsg_Term(m_natsMsg.get(), nullptr));
+}
+
 PullSubscription::~PullSubscription() noexcept
 {
     natsSubscription_Destroy(m_sub);
@@ -52,6 +81,7 @@ QList<Message> PullSubscription::fetch(int batch, qint64 timeout)
     QList<Message> result;
     for (int i = 0; i < list.Count; i++) {
         result += Message(list.Msgs[i]);
+        list.Msgs[i] = nullptr; //natsMsgList_Destroy should destroy only the list, and keep the messages
     }
     natsMsgList_Destroy(&list);
     return result;
@@ -158,9 +188,10 @@ void JetStream::waitForPublishCompleted(qint64 timeout)
 
 Subscription* JetStream::subscribe(const QByteArray& subject, jsSubOptions* subOpts)
 {
+    subOpts->ManualAck = true; // avoid _autoAckCB in cnats internals, because it takes over ownership of delivered messages
     auto sub = std::unique_ptr<Subscription>(new Subscription(nullptr));
     jsErrCode jsErr;
-    natsStatus s = js_Subscribe(&sub->m_sub, m_jsCtx, qPrintable(subject), &subscriptionCallback, sub.get(), nullptr, subOpts, &jsErr);
+    natsStatus s = js_Subscribe(&sub->m_sub, m_jsCtx, subject.constData(), &subscriptionCallback, sub.get(), nullptr, subOpts, &jsErr);
     checkJsError(s, jsErr);
     sub->setParent(this);
     return sub.release();

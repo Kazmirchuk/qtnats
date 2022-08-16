@@ -35,6 +35,7 @@ private slots:
     void cleanupTestCase();
 
     void subscribe();
+    void request();
     void asyncRequest();
 };
 
@@ -60,41 +61,82 @@ void CoreTestCase::subscribe()
         Connection c;
         c.connectToServer(QUrl("nats://localhost:4222"));
         auto sub = c.subscribe("test_subject");
-        c.ping(); //ensure the server received SUB
-        Message recv;
-        connect(sub, &Subscription::received, [&recv](const Message& message) {
-            recv = message;
+        
+        QList<Message> msgList;
+        connect(sub, &Subscription::received, [&msgList](const Message& message) {
+            msgList += message;
         });
+
+        c.ping(); //ensure the server received SUB
+
         QProcess natsCli;
-        natsCli.start("nats", QStringList() << "publish" << "test_subject" << "hello");
+        natsCli.start("nats", QStringList() << "publish" << "--count=100" << "test_subject" << "hello");
         natsCli.waitForFinished();
         
-        QTRY_COMPARE_WITH_TIMEOUT(recv.subject, "test_subject", 500);
-        QCOMPARE(recv.data, QByteArray("hello"));
+        QTest::qWait(1000);
+        QCOMPARE(msgList.size(), 100);
+        for (Message m : msgList) {
+            QCOMPARE(m.subject, "test_subject");
+            QCOMPARE(m.data, "hello");
+        }
     }
     catch (const QException& e) {
         QFAIL(e.what());
     }
 }
 
-void CoreTestCase::asyncRequest()
+void CoreTestCase::request()
 {
+    QProcess responder;
     try {
-        QProcess natsCli; 
-        natsCli.start("nats", QStringList() << "reply" << "foo" << "bla"); // can't use --count=1 because sometimes NATS CLI exits before flushing its reply (?!)
-        natsCli.waitForStarted();
-        QTest::qWait(1000);
         Connection c;
         c.connectToServer(QUrl("nats://localhost:4222"));
-        auto future = c.asyncRequest(Message("foo", "bar"));
-        future.waitForFinished();
-        natsCli.close();
-        natsCli.waitForFinished();
-        QCOMPARE(future.result().data, QByteArray("bla"));
+        
+        responder.start("nats", QStringList() << "reply" << "service" << "bla");
+        responder.waitForStarted();
+        QTest::qWait(1000);
+
+        for (int i = 0; i < 100; i++) {
+            Message response = c.request(Message("service", "foo"), 1000);
+            QCOMPARE(response.data, "bla");
+        }
     }
     catch (const QException& e) {
         QFAIL(e.what());
     }
+    responder.close();
+    responder.waitForFinished();
+}
+
+void CoreTestCase::asyncRequest()
+{
+    QProcess responder;
+    try {
+        responder.start("nats", QStringList() << "reply" << "service" << "bla"); // can't use --count because sometimes NATS CLI exits before flushing its reply (?!)
+        responder.waitForStarted();
+        QTest::qWait(1000);
+        
+        Connection c;
+        c.connectToServer(QUrl("nats://localhost:4222"));
+        QList<QFuture<Message>> futuresList;
+        for (int i = 0; i < 100; i++) {
+            futuresList += c.asyncRequest(Message("service", "bar"));
+        }
+        QTest::qWait(2000);
+        
+        c.close();
+        QCOMPARE(futuresList.size(), 100);
+
+        for (QFuture<Message> f : futuresList) {
+            QCOMPARE(f.isFinished(), true);
+            QCOMPARE(f.result().data, "bla");
+        }
+    }
+    catch (const QException& e) {
+        QFAIL(e.what());
+    }
+    responder.close();
+    responder.waitForFinished();
 }
 
 QTEST_GUILESS_MAIN(CoreTestCase)

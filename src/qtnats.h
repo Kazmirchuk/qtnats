@@ -107,7 +107,7 @@ namespace QtNats {
 
         // JetStream acknowledgments
         void ack();
-        void nack();
+        void nack(qint64 delay = -1); //ms
         void inProgress();
         void terminate();
 

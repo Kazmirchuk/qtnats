@@ -112,26 +112,6 @@ Message::Message(natsMsg* msg) noexcept:
     free(keys);
 };
 
-void Message::ack()
-{
-
-}
-
-void Message::nack()
-{
-
-}
-
-void Message::inProgress()
-{
-
-}
-
-void Message::terminate()
-{
-
-}
-
 NatsMsgPtr QtNats::toNatsMsg(const Message& msg, const char* reply)
 {
     natsMsg* cnatsMsg;

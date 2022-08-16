@@ -79,7 +79,6 @@ void JetStreamTestCase::publish()
         auto ack = js->publish(Message("test.1", "HI"));
 
         QCOMPARE(ack.stream, QString("MY_STREAM"));
-        QCOMPARE(ack.sequence, 1);
 
         for (int i = 0; i < 5; i++) {
             js->asyncPublish(Message("test.1", "HI"), 1000);
@@ -92,17 +91,16 @@ void JetStreamTestCase::publish()
 }
 
 void JetStreamTestCase::pullSubscribe() {
-    
     try {
         Connection c;
         c.connectToServer(QUrl("nats://localhost:4222"));
 
         auto js = c.jetStream();
-        
+
         natsCli.start("nats", QStringList() << "consumer" << "add" << "MY_STREAM" << "PULL_CONSUMER" << "--config=pull_consumer_config.json");
         natsCli.waitForFinished();
 
-        natsCli.start("nats", QStringList() << "publish" << "-H" << "hdr1:val1" << "test.pull" << "hello JS");
+        natsCli.start("nats", QStringList() << "publish" << "--count=10" << "-H" << "hdr1:val1" << "test.pull" << "hello JS");
         natsCli.waitForFinished();
 
         jsSubOptions subOpts;
@@ -112,29 +110,35 @@ void JetStreamTestCase::pullSubscribe() {
 
         auto sub = js->pullSubscribe("test.pull", "PULL_CONSUMER", &subOpts);
 
-        auto msgList = sub->fetch();
-        QCOMPARE(msgList.size(), 1);
-        Message m = msgList[0];
-        QCOMPARE(m.data, QByteArray("hello JS"));
-        QCOMPARE(m.subject, QString("test.pull"));
+        auto msgList = sub->fetch(10);
+
+        for (Message m : msgList) {
+            m.ack();
+        }
+
+        QCOMPARE(msgList.size(), 10);
+        for (Message m : msgList) {
+            QCOMPARE(m.data, "hello JS");
+            QCOMPARE(m.subject, "test.pull");
+            auto val = m.headers.values("hdr1");
+            QCOMPARE(val.size(), 1);
+            QCOMPARE(val[0], "val1");
+        }
     }
     catch (const QException& e) {
         QFAIL(e.what());
     }
 }
 
-void JetStreamTestCase::pushSubscribe() {
-    
-    Connection c;
+void JetStreamTestCase::pushSubscribe()
+{
     try {
+        Connection c;
         c.connectToServer(QUrl("nats://localhost:4222"));
 
         auto js = c.jetStream();
 
         natsCli.start("nats", QStringList() << "consumer" << "add" << "MY_STREAM" << "PUSH_CONSUMER" << "--config=push_consumer_config.json");
-        natsCli.waitForFinished();
-
-        natsCli.start("nats", QStringList() << "publish" << "-H" << "hdr1:val1" << "test.push" << "hello JS again");
         natsCli.waitForFinished();
 
         jsSubOptions subOpts;
@@ -145,13 +149,21 @@ void JetStreamTestCase::pushSubscribe() {
         auto sub = js->subscribe("test.push", &subOpts);
         // can we miss a message if "connect" is not fast enough?
         // apparently, consumer's deliver_subject does not matter here
-        Message msg;
-        connect(sub, &Subscription::received, [&msg](const Message& message) {
-            msg = message;
+        QList<Message> msgList;
+        connect(sub, &Subscription::received, [&msgList](const Message& message) {
+            msgList += message;
         });
 
-        QTRY_COMPARE_WITH_TIMEOUT(msg.data, QByteArray("hello JS again"), 1000);
-        QCOMPARE(msg.subject, QString("test.push"));
+        natsCli.start("nats", QStringList() << "publish" << "--count=10" << "test.push" << "hello JS again");
+        natsCli.waitForFinished();
+
+        QTest::qWait(1000);
+
+        QCOMPARE(msgList.size(), 10);
+        for (Message m : msgList) {
+            QCOMPARE(m.data, "hello JS again");
+            QCOMPARE(m.subject, "test.push");
+        }
     }
     catch (const QException& e) {
         QFAIL(e.what());
