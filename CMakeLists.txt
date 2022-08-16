@@ -45,11 +45,10 @@ set_target_properties(qtnats PROPERTIES VERSION 0.1.0 SOVERSION 0.1)
 
 
 # ------------- unit tests ----------------------
-file(GLOB SOURCES "test/*.cpp")
-add_executable(qtnats_test ${SOURCES})
-target_link_libraries(qtnats_test qtnats Qt::Test)
+add_executable(test_core test/test_core.cpp)
+add_test(NAME test_core COMMAND test_core)
+target_link_libraries(test_core PRIVATE qtnats Qt5::Test)
 
-
-
-
-
+add_executable(test_jetstream test/test_jetstream.cpp)
+add_test(NAME test_jetstream COMMAND test_jetstream)
+target_link_libraries(test_jetstream PRIVATE qtnats Qt5::Test)

@@ -6,7 +6,11 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 #pragma once
 
+#include <memory>
+
 #include <QObject>
+// I've received the clarification that Latin-1 should be used everywhere for strings, so QByteArray is clearer API than QString
+// https://github.com/nats-io/nats.c/issues/573
 #include <QByteArray>
 #include <QFuture>
 #include <QUrl>
@@ -23,7 +27,7 @@ namespace QtNats {
 
     Q_NAMESPACE
 
-    using MessageHeaders = QMultiHash<QString, QString>;
+    using MessageHeaders = QMultiHash<QByteArray, QByteArray>;
 
     enum class ConnectionStatus
     {
@@ -55,22 +59,29 @@ namespace QtNats {
     class JetStreamException : public Exception
     {
     public:
-        JetStreamException(natsStatus s, jsErrCode js) : Exception(s), jsError(js) {}
+        JetStreamException(natsStatus s, jsErrCode js) : Exception(s), jsError(js), errorText(initText(js)) {}
         void raise() const override { throw* this; }
         JetStreamException* clone() const override { return new JetStreamException(*this); }
+        const char* what() const noexcept override { return errorText.constData(); }
 
         const jsErrCode jsError = jsErrCode(0);
+
+    private:
+        QByteArray initText(jsErrCode js) {
+            return QString("%1: %2").arg(Exception::what()).arg(js).toLatin1();
+        }
+        const QByteArray errorText;
     };
 
     struct Options
     {
         QList<QUrl> servers;
-        QString user;
-        QString password;
-        QString token;
+        QByteArray user;
+        QByteArray password;
+        QByteArray token;
         bool randomize = true; //NB! reverted option
         qint64 timeout;
-        QString name;
+        QByteArray name;
         bool secure = false;
         bool verbose = false;
         bool pedantic = false;
@@ -85,38 +96,31 @@ namespace QtNats {
         bool echo = true; //NB! reverted option
 
         Options();
-        ~Options();
-
-    private:
-        mutable natsOptions* o = nullptr;
-        natsOptions* build() const;
-        friend class Connection;
     };
 
-    // this could be a simple struct, but in future I may need to optimize it to minimize conversions const char* -> QString etc
-    // so keep getters and setters
-    class Message
+    struct Message
     {
-    public:
         Message() {}
-        Message(const QString& subject, const QByteArray& data) : m_subject(subject), m_data(data) {}
-        QString subject() const { return m_subject; }
-        QString reply() const { return m_reply; }
-        QByteArray data() const { return m_data; }
-        MessageHeaders headers() const { return m_headers; }
+        Message(const QByteArray& in_subject, const QByteArray& in_data) : subject(in_subject), data(in_data) {}
+        explicit Message(natsMsg* cmsg) noexcept;
+        bool isIncoming() const { return bool(m_natsMsg); }
 
-        void setSubject(const QString& s) { m_subject = s; }
-        void setReply(const QString& r) { m_reply = r; }
-        void setData(const QByteArray& d) { m_data = d; }
-        void setHeaders(const MessageHeaders& h) { m_headers = h; }
+        // JetStream acknowledgments
+        void ack();
+        void nack();
+        void inProgress();
+        void terminate();
 
-    private:
-        QString m_subject;
-        QString m_reply;
-        QByteArray m_data;
+
+        QByteArray subject;
+        QByteArray reply;
+        QByteArray data;
         // NB! 1. headers are case-sensitive
         // 2. cnats does NOT preserve the order of headers
-        MessageHeaders m_headers;
+        MessageHeaders headers;
+        
+    private:
+        std::shared_ptr<natsMsg> m_natsMsg;
     };
 
     class Subscription;
@@ -125,7 +129,7 @@ namespace QtNats {
     struct JsOptions
     {
         // QString prefix = "$JS.API"; don't think it's a good idea to change this?
-        QString domain;
+        QByteArray domain;
         qint64 timeout = 5000;
     };
 
@@ -150,18 +154,20 @@ namespace QtNats {
         Message request(const Message& msg, qint64 timeout = 2000);
         QFuture<Message> asyncRequest(const Message& msg, qint64 timeout = 2000);
 
-        Subscription* subscribe(const QString& subject);
-        Subscription* subscribe(const QString& subject, const QString& queueGroup);
+        Subscription* subscribe(const QByteArray& subject);
+        Subscription* subscribe(const QByteArray& subject, const QByteArray& queueGroup);
 
-        bool ping(qint64 timeout = 10000); //ms
+        bool ping(qint64 timeout = 10000) noexcept; //ms
         
-        QString currentServer() const;
+        QUrl currentServer() const;
         ConnectionStatus status() const;
         QString errorString() const;
 
-        static QString newInbox();
+        static QByteArray newInbox();
 
         JetStream* jetStream(const JsOptions& options = JsOptions());
+
+        natsConnection* getNatsConnection() const { return m_conn; }
 
     signals:
         void errorOccurred(natsStatus error, const QString& text);
@@ -189,6 +195,7 @@ namespace QtNats {
 
         natsSubscription* m_sub = nullptr;
         friend class Connection;
+        friend class JetStream;
     };
 
     // ---------------------------- JET STREAM -------------------------------
@@ -196,9 +203,9 @@ namespace QtNats {
     struct JsPublishOptions
     {
         qint64 timeout = -1;
-        QString msgID;
-        QString expectStream;
-        QString expectLastMessageID;
+        QByteArray msgID;
+        QByteArray expectStream;
+        QByteArray expectLastMessageID;
         quint64 expectLastSequence = 0;
         quint64 expectLastSubjectSequence = 0;
         bool expectNoMessage = false;
@@ -206,10 +213,29 @@ namespace QtNats {
 
     struct JsPublishAck
     {
-        QString stream;
+        QByteArray stream;
         quint64 sequence;
-        QString domain;
+        QByteArray domain;
         bool duplicate;
+    };
+
+    class PullSubscription : public QObject
+    {
+        Q_OBJECT
+        Q_DISABLE_COPY(PullSubscription)
+
+    public:
+        ~PullSubscription() noexcept override;
+        PullSubscription(PullSubscription&&) = delete;
+        PullSubscription& operator=(PullSubscription&&) = delete;
+
+        QList<Message> fetch(int batch = 1, qint64 timeout = 5000);
+
+    private:
+        PullSubscription(QObject* parent) : QObject(parent) {}
+
+        natsSubscription* m_sub = nullptr;
+        friend class JetStream;
     };
 
     class JetStream : public QObject
@@ -228,6 +254,11 @@ namespace QtNats {
         void asyncPublish(const Message& msg, const JsPublishOptions& opts);
         void asyncPublish(const Message& msg, qint64 timeout = -1);
         void waitForPublishCompleted(qint64 timeout = -1);
+
+        Subscription* subscribe(const QByteArray& subject, jsSubOptions* subOpts);
+        PullSubscription* pullSubscribe(const QByteArray& subject, const QByteArray& durable, jsSubOptions* subOpts);
+
+        jsCtx* getJsContext() const { return m_jsCtx; }
         
     signals:
         void errorOccurred(natsStatus error, jsErrCode jsErr, const QString& text, const Message& msg);

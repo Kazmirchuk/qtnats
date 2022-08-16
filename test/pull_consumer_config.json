@@ -1,0 +1,8 @@
+{
+  "ack_policy": "explicit",
+  "deliver_policy": "all",
+  "durable_name": "PULL_CONSUMER",
+  "filter_subject": "test.pull",
+  "max_deliver": 5,
+  "replay_policy": "instant"
+}

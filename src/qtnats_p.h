@@ -14,6 +14,7 @@ namespace QtNats {
 
 	using NatsMsgPtr = std::unique_ptr<natsMsg, decltype(&natsMsg_Destroy)>;
 
-	Message fromNatsMsg(natsMsg* msg) noexcept;
 	NatsMsgPtr toNatsMsg(const Message& msg, const char* reply = nullptr);
+
+	void subscriptionCallback(natsConnection* nc, natsSubscription* sub, natsMsg* msg, void* closure);
 }

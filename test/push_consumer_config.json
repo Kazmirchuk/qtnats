@@ -1,0 +1,8 @@
+{
+  "ack_policy": "none",
+  "deliver_policy": "last",
+  "deliver_subject": "delivery",
+  "durable_name": "PUSH_CONSUMER",
+  "max_deliver": 5,
+  "replay_policy": "instant"
+}

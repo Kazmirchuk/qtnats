@@ -18,7 +18,7 @@ static void checkJsError(natsStatus s, jsErrCode js)
 static void jsPubErrHandler(jsCtx*, jsPubAckErr* pae, void* closure)
 {
     JetStream* js = reinterpret_cast<JetStream*>(closure);
-    Message msg = fromNatsMsg(pae->Msg);
+    Message msg (pae->Msg);
     emit js->errorOccurred(pae->Err, pae->ErrCode, QString(pae->ErrText), msg);
 }
 
@@ -37,6 +37,26 @@ JetStream* Connection::jetStream(const JsOptions& options)
     return js;
 }
 
+PullSubscription::~PullSubscription() noexcept
+{
+    natsSubscription_Destroy(m_sub);
+}
+
+QList<Message> PullSubscription::fetch(int batch, qint64 timeout)
+{
+    // see also https://github.com/nats-io/nats.c/issues/545
+    natsMsgList list {nullptr, 0};
+    jsErrCode jsErr;
+    natsStatus s = natsSubscription_Fetch(&list, m_sub, batch, timeout, &jsErr);
+    checkJsError(s, jsErr);
+    QList<Message> result;
+    for (int i = 0; i < list.Count; i++) {
+        result += Message(list.Msgs[i]);
+    }
+    natsMsgList_Destroy(&list);
+    return result;
+}
+
 JetStream::~JetStream() noexcept
 {
 	jsCtx_Destroy(m_jsCtx);
@@ -46,8 +66,8 @@ static JsPublishAck fromJsPubAck(jsPubAck* ack)
 {
     JsPublishAck result;
 
-    result.stream = QString::fromLatin1(ack->Stream);
-    result.domain = QString::fromLatin1(ack->Domain);
+    result.stream = QByteArray(ack->Stream);
+    result.domain = QByteArray(ack->Domain);
     result.sequence = ack->Sequence;
     result.duplicate = ack->Duplicate;
     jsPubAck_Destroy(ack);
@@ -62,20 +82,17 @@ static void jsPublishOptionsToC(const JsPublishOptions& opts, jsPubOptions* out)
 
     QByteArray msgID;
     if (opts.msgID.size()) {
-        msgID = opts.msgID.toLatin1();
-        out->MsgId = msgID.constData();
+        out->MsgId = opts.msgID.constData();
     }
 
     QByteArray expectStream;
     if (opts.expectStream.size()) {
-        expectStream = opts.expectStream.toLatin1();
-        out->ExpectStream = expectStream.constData();
+        out->ExpectStream = opts.expectStream.constData();
     }
 
     QByteArray expectLastMessageID;
     if (opts.expectLastMessageID.size()) {
-        expectLastMessageID = opts.expectLastMessageID.toLatin1();
-        out->ExpectLastMsgId = expectLastMessageID.constData();
+        out->ExpectLastMsgId = opts.expectLastMessageID.constData();
     }
 
     out->ExpectLastSeq = opts.expectLastSequence;
@@ -119,6 +136,7 @@ void JetStream::asyncPublish(const Message& msg, qint64 timeout)
 
 void JetStream::waitForPublishCompleted(qint64 timeout)
 {
+    // TODO use QtConcurrent::run and return QFuture?
     natsStatus s = NATS_OK;
     if (timeout != -1) {
         jsPubOptions jsOpts;
@@ -130,13 +148,33 @@ void JetStream::waitForPublishCompleted(qint64 timeout)
         s = js_PublishAsyncComplete(m_jsCtx, nullptr);
     }
     if (s == NATS_TIMEOUT) {
-        // this doesn't compile https://github.com/nats-io/nats.c/issues/545
+        // optionally we can delete the messages, but they might be ACK'ed later
         //natsMsgList list;
-        
         //js_PublishAsyncGetPendingList(&list, m_jsCtx);
         //natsMsgList_Destroy(&list);
     }
     checkError(s);
+}
+
+Subscription* JetStream::subscribe(const QByteArray& subject, jsSubOptions* subOpts)
+{
+    auto sub = std::unique_ptr<Subscription>(new Subscription(nullptr));
+    jsErrCode jsErr;
+    natsStatus s = js_Subscribe(&sub->m_sub, m_jsCtx, qPrintable(subject), &subscriptionCallback, sub.get(), nullptr, subOpts, &jsErr);
+    checkJsError(s, jsErr);
+    sub->setParent(this);
+    return sub.release();
+}
+
+PullSubscription* JetStream::pullSubscribe(const QByteArray& subject, const QByteArray& durable, jsSubOptions* subOpts)
+{
+    auto sub = std::unique_ptr<PullSubscription>(new PullSubscription(nullptr));
+    jsErrCode jsErr;
+    
+    natsStatus s = js_PullSubscribe(&sub->m_sub, m_jsCtx, qPrintable(subject), qPrintable(durable), nullptr, subOpts, &jsErr);
+    checkJsError(s, jsErr);
+    sub->setParent(this);
+    return sub.release();
 }
 
 JsPublishAck JetStream::doPublish(const Message& msg, jsPubOptions* opts)
@@ -153,7 +191,7 @@ JsPublishAck JetStream::doPublish(const Message& msg, jsPubOptions* opts)
 
 void JetStream::doAsyncPublish(const Message& msg, jsPubOptions* opts)
 {
-    const QByteArray data = msg.data();
     //js_PublishMsgAsync is tricky to manage lifetime of natsMsg, so let's go the safe way
-    checkError(js_PublishAsync(m_jsCtx, qPrintable(msg.subject()), data.constData(), data.size(), opts));
+    //TODO headers will require js_PublishMsgAsync
+    checkError(js_PublishAsync(m_jsCtx, msg.subject.constData(), msg.data.constData(), msg.data.size(), opts));
 }
