@@ -50,7 +50,7 @@ namespace QtNats {
         Exception* clone() const override { return new Exception(*this); }
         const char* what() const noexcept override { return natsStatus_GetText(errorCode); }
 
-        const natsStatus errorCode = NATS_OK;
+        const natsStatus errorCode;
     };
 
     class JetStreamException : public Exception
@@ -61,7 +61,7 @@ namespace QtNats {
         JetStreamException* clone() const override { return new JetStreamException(*this); }
         const char* what() const noexcept override { return errorText.constData(); }
 
-        const jsErrCode jsError = jsErrCode(0);
+        const jsErrCode jsError;
 
     private:
         QByteArray initText(jsErrCode js) {

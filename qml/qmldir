@@ -1,0 +1,7 @@
+# docs: http://doc.qt.io/qt-5/qtqml-modules-qmldir.html
+
+module NATS
+
+plugin qmlnatsplugin
+
+# TODO typeinfo plugins.qmltypes
