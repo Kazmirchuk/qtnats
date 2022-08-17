@@ -4,6 +4,7 @@ project(QtNats)
 
 include(CMakePrintHelpers)
 include(FetchContent)
+include(GenerateExportHeader)
 
 set(default_build_type "Release")
 option(QTNATS_BUILD_LIB_STATIC "Build static library" ON) #unused yet
@@ -11,6 +12,7 @@ option(QTNATS_BUILD_LIB_STATIC "Build static library" ON) #unused yet
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)  # to find qtnats_export.h
 
 find_package(Qt5 COMPONENTS Core Test REQUIRED)
 
@@ -28,8 +30,7 @@ set(NATS_BUILD_EXAMPLES OFF)
 set(NATS_BUILD_STREAMING OFF)
 set(NATS_BUILD_LIB_SHARED OFF)
 
-# also in cnats
-set(BUILD_TESTING OFF)
+set(BUILD_TESTING OFF)  # do not build cnats tests
 
 FetchContent_MakeAvailable(cnats)
 
@@ -38,11 +39,11 @@ include_directories(${cnats_SOURCE_DIR}/src src)
 # ------------- qtnats library ----------------------
 file(GLOB SOURCES "src/*.cpp")
 file(GLOB HEADERS "src/*.h")
-add_library(qtnats STATIC ${SOURCES} ${HEADERS})
+add_library(qtnats SHARED ${SOURCES} ${HEADERS})
 target_link_libraries(qtnats nats_static Qt::Core)
 set_target_properties(qtnats PROPERTIES VERSION 0.1.0 SOVERSION 0.1)
 
-
+GENERATE_EXPORT_HEADER(qtnats)
 
 # ------------- unit tests ----------------------
 add_executable(test_core test/test_core.cpp)

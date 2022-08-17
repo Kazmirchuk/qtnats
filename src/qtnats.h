@@ -16,13 +16,10 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #include <QUrl>
 #include <QMultiHash>
 
-
-// consider moving to PIMPL?
-// https://wiki.qt.io/D-Pointer
-// https://stackoverflow.com/questions/25250171/how-to-use-the-qts-pimpl-idiom
 #include <nats.h>
 
-// https://cmake.org/cmake/help/v3.0/module/GenerateExportHeader.html
+#include "qtnats_export.h"
+
 namespace QtNats {
 
     Q_NAMESPACE
@@ -73,7 +70,7 @@ namespace QtNats {
         const QByteArray errorText;
     };
 
-    struct Options
+    struct QTNATS_EXPORT Options
     {
         QList<QUrl> servers;
         QByteArray user;
@@ -98,7 +95,7 @@ namespace QtNats {
         Options();
     };
 
-    struct Message
+    struct QTNATS_EXPORT Message
     {
         Message() {}
         Message(const QByteArray& in_subject, const QByteArray& in_data) : subject(in_subject), data(in_data) {}
@@ -134,7 +131,7 @@ namespace QtNats {
     };
 
 
-    class Connection : public QObject
+    class QTNATS_EXPORT Connection : public QObject
     {
         Q_OBJECT
         Q_DISABLE_COPY(Connection)
@@ -177,7 +174,7 @@ namespace QtNats {
         natsConnection* m_conn = nullptr;
     };
     
-    class Subscription : public QObject
+    class QTNATS_EXPORT Subscription : public QObject
     {
         Q_OBJECT
         Q_DISABLE_COPY(Subscription)
@@ -219,7 +216,7 @@ namespace QtNats {
         bool duplicate;
     };
 
-    class PullSubscription : public QObject
+    class QTNATS_EXPORT PullSubscription : public QObject
     {
         Q_OBJECT
         Q_DISABLE_COPY(PullSubscription)
@@ -238,7 +235,7 @@ namespace QtNats {
         friend class JetStream;
     };
 
-    class JetStream : public QObject
+    class QTNATS_EXPORT JetStream : public QObject
     {
         Q_OBJECT
         Q_DISABLE_COPY(JetStream)
