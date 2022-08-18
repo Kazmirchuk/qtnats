@@ -8,18 +8,22 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 #include <qtnats.h>
 
-#include <QObject>
+#include <QQmlEngine>
 
 class QmlNatsSubscription;
 
-class QmlNatsConnection : public QObject
+class QmlNatsClient : public QObject
 {
     Q_OBJECT
-    Q_DISABLE_COPY(QmlNatsConnection)
+    QML_NAMED_ELEMENT(NatsClient)
+
+    Q_DISABLE_COPY(QmlNatsClient)
     Q_PROPERTY(QString serverUrl MEMBER m_serverUrl)
+    Q_PROPERTY(QString status READ status NOTIFY statusChanged)
 
 public:
-    QmlNatsConnection(QObject* parent = nullptr);
+    QmlNatsClient(QObject* parent = nullptr);
+    QString status() const;
 
 public slots:
     bool connectToServer();
@@ -29,8 +33,11 @@ public slots:
     void publish(const QString& subject, const QString& message);
     QString request(const QString& subject, const QString& message);
 
+signals:
+    void statusChanged(QString status);
+
 private:
-    QtNats::Connection m_conn;
+    QtNats::Client* m_conn = nullptr;
     QString m_serverUrl;
 };
 
@@ -38,13 +45,13 @@ class QmlNatsSubscription : public QObject
 {
     Q_OBJECT
     Q_DISABLE_COPY(QmlNatsSubscription)
+    QML_UNCREATABLE("Use NatsClient to create subscriptions")
 
 public:
-    QmlNatsSubscription(QtNats::Subscription* s);
-    ~QmlNatsSubscription();
+    QmlNatsSubscription(QtNats::Subscription* s, QObject* parent = nullptr);
 
 signals:
-    void received(const QString& subject, const QString& reply, const QByteArray& data);
+    void received(const QString& message); //only payload
 
 private:
     QtNats::Subscription* m_sub;

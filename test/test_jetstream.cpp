@@ -67,7 +67,7 @@ void JetStreamTestCase::cleanupTestCase()
 void JetStreamTestCase::publish()
 {
     try {
-        Connection c;
+        Client c;
         c.connectToServer(QUrl("nats://localhost:4222"));
         
         auto js = c.jetStream();
@@ -92,7 +92,7 @@ void JetStreamTestCase::publish()
 
 void JetStreamTestCase::pullSubscribe() {
     try {
-        Connection c;
+        Client c;
         c.connectToServer(QUrl("nats://localhost:4222"));
 
         auto js = c.jetStream();
@@ -103,12 +103,7 @@ void JetStreamTestCase::pullSubscribe() {
         natsCli.start("nats", QStringList() << "publish" << "--count=10" << "-H" << "hdr1:val1" << "test.pull" << "hello JS");
         natsCli.waitForFinished();
 
-        jsSubOptions subOpts;
-        jsSubOptions_Init(&subOpts);
-        subOpts.Stream = "MY_STREAM";
-        subOpts.Consumer = "PULL_CONSUMER";
-
-        auto sub = js->pullSubscribe("test.pull", "PULL_CONSUMER", &subOpts);
+        auto sub = js->pullSubscribe("test.pull", "MY_STREAM", "PULL_CONSUMER");
 
         auto msgList = sub->fetch(10);
 
@@ -133,7 +128,7 @@ void JetStreamTestCase::pullSubscribe() {
 void JetStreamTestCase::pushSubscribe()
 {
     try {
-        Connection c;
+        Client c;
         c.connectToServer(QUrl("nats://localhost:4222"));
 
         auto js = c.jetStream();
@@ -141,12 +136,7 @@ void JetStreamTestCase::pushSubscribe()
         natsCli.start("nats", QStringList() << "consumer" << "add" << "MY_STREAM" << "PUSH_CONSUMER" << "--config=push_consumer_config.json");
         natsCli.waitForFinished();
 
-        jsSubOptions subOpts;
-        jsSubOptions_Init(&subOpts);
-        subOpts.Stream = "MY_STREAM";
-        subOpts.Consumer = "PUSH_CONSUMER";
-
-        auto sub = js->subscribe("test.push", &subOpts);
+        auto sub = js->subscribe("test.push", "MY_STREAM", "PUSH_CONSUMER");
         // can we miss a message if "connect" is not fast enough?
         // apparently, consumer's deliver_subject does not matter here
         QList<Message> msgList;

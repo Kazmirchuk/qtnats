@@ -169,27 +169,27 @@ static void asyncRequestCallback(natsConnection* /*nc*/, natsSubscription* natsS
 }
 
 static void errorHandler(natsConnection* /*nc*/, natsSubscription* /*subscription*/, natsStatus err, void* closure) {
-    Connection* c = reinterpret_cast<Connection*>(closure);
+    Client* c = reinterpret_cast<Client*>(closure);
     emit c->errorOccurred(err, getNatsErrorText(err));
 }
 
 static void closedConnectionHandler(natsConnection* /*nc*/, void *closure) {
-    Connection* c = reinterpret_cast<Connection*>(closure);
+    Client* c = reinterpret_cast<Client*>(closure);
     //can ask for last error here
     emit c->statusChanged(ConnectionStatus::Closed);
 }
 
 static void reconnectedHandler(natsConnection* /*nc*/, void *closure) {
-    Connection* c = reinterpret_cast<Connection*>(closure);
+    Client* c = reinterpret_cast<Client*>(closure);
     emit c->statusChanged(ConnectionStatus::Connected);
 }
 
 static void disconnectedHandler(natsConnection* /*nc*/, void *closure) {
-    Connection* c = reinterpret_cast<Connection*>(closure);
-    emit c->statusChanged(ConnectionStatus::Reconnecting);
+    Client* c = reinterpret_cast<Client*>(closure);
+    emit c->statusChanged(ConnectionStatus::Disconnected);
 }
 
-Connection::Connection(QObject* parent):
+Client::Client(QObject* parent):
     QObject(parent)
 {
     int cpuCoresCount = QThread::idealThreadCount(); //this function may fail, thus the check
@@ -198,12 +198,12 @@ Connection::Connection(QObject* parent):
     }
 }
 
-Connection::~Connection()
+Client::~Client()
 {
     close();
 }
 
-void Connection::connectToServer(const Options& opts)
+void Client::connectToServer(const Options& opts)
 {
     natsOptions* nats_opts = buildNatsOptions(opts);
     //don't create a thread for each subscription, since we may have a lot of subscriptions
@@ -215,19 +215,20 @@ void Connection::connectToServer(const Options& opts)
     natsOptions_SetDisconnectedCB(nats_opts, &disconnectedHandler, this);
     natsOptions_SetReconnectedCB(nats_opts, &reconnectedHandler, this);
 
+    emit statusChanged(ConnectionStatus::Connecting);
     checkError(natsConnection_Connect(&m_conn, nats_opts));
-
+    emit statusChanged(ConnectionStatus::Connected);
     //TODO handle reopening
 }
 
-void Connection::connectToServer(const QUrl& address)
+void Client::connectToServer(const QUrl& address)
 {
     Options connOpts;
     connOpts.servers += address;
     connectToServer(connOpts);
 }
 
-void Connection::close() noexcept
+void Client::close() noexcept
 {
     if (!m_conn) {
         return;
@@ -239,12 +240,12 @@ void Connection::close() noexcept
     m_conn = nullptr;
 }
 
-void Connection::publish(const Message& msg) {
+void Client::publish(const Message& msg) {
     NatsMsgPtr p = toNatsMsg(msg);
     checkError(natsConnection_PublishMsg(m_conn, p.get()));
 }
 
-Message Connection::request(const Message& msg, qint64 timeout)
+Message Client::request(const Message& msg, qint64 timeout)
 {
     natsMsg* replyMsg;
     NatsMsgPtr p = toNatsMsg(msg);
@@ -252,12 +253,12 @@ Message Connection::request(const Message& msg, qint64 timeout)
     return Message(replyMsg);
 }
 
-QFuture<Message> Connection::asyncRequest(const Message& msg, qint64 timeout)
+QFuture<Message> Client::asyncRequest(const Message& msg, qint64 timeout)
 {
     // QFutureInterface is undocumented; Qt6 provides QPromise instead
     // based on https://stackoverflow.com/questions/59197694/qt-how-to-create-a-qfuture-from-a-thread
     auto future_iface = std::make_unique<QFutureInterface<Message>>();
-    QByteArray inbox = Connection::newInbox();
+    QByteArray inbox = Client::newInbox();
 
     natsSubscription* subscription = nullptr;
     
@@ -273,7 +274,7 @@ QFuture<Message> Connection::asyncRequest(const Message& msg, qint64 timeout)
     return f;
 }
 
-Subscription* Connection::subscribe(const QByteArray& subject)
+Subscription* Client::subscribe(const QByteArray& subject)
 {
     // avoid a memory leak if checkError throws
     // can't use make_unique because Subscription's constructor is private
@@ -283,7 +284,7 @@ Subscription* Connection::subscribe(const QByteArray& subject)
     return sub.release();
 }
 
-Subscription* Connection::subscribe(const QByteArray& subject, const QByteArray& queueGroup)
+Subscription* Client::subscribe(const QByteArray& subject, const QByteArray& queueGroup)
 {
     auto sub = std::unique_ptr<Subscription>(new Subscription(nullptr));
     checkError(natsConnection_QueueSubscribe(&sub->m_sub, m_conn, subject.constData(), queueGroup.constData(), &subscriptionCallback, sub.get()));
@@ -291,13 +292,13 @@ Subscription* Connection::subscribe(const QByteArray& subject, const QByteArray&
     return sub.release();
 }
 
-bool Connection::ping(qint64 timeout) noexcept
+bool Client::ping(qint64 timeout) noexcept
 {
     natsStatus s = natsConnection_FlushTimeout(m_conn, timeout);
     return (s == NATS_OK);
 }
 
-QUrl Connection::currentServer() const
+QUrl Client::currentServer() const
 {
     char buffer[500];
     natsStatus s = natsConnection_GetConnectedUrl(m_conn, buffer, sizeof(buffer));
@@ -307,12 +308,12 @@ QUrl Connection::currentServer() const
     return QUrl(QString::fromLatin1(buffer));
 }
 
-ConnectionStatus Connection::status() const
+ConnectionStatus Client::status() const
 {
     return ConnectionStatus(natsConnection_Status(m_conn));
 }
 
-QString Connection::errorString() const
+QString Client::errorString() const
 {
     // TODO handle when m_conn==nullptr ?
     const char* buffer = nullptr;
@@ -320,7 +321,7 @@ QString Connection::errorString() const
     return QString::fromLatin1(buffer);
 }
 
-QByteArray Connection::newInbox()
+QByteArray Client::newInbox()
 {
     natsInbox* inbox = nullptr;
     natsInbox_Create(&inbox);

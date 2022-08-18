@@ -7,43 +7,70 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 #include "qmlnatsplugin.h"
 
-QmlNatsConnection::QmlNatsConnection(QObject* parent) : QObject(parent)
+using namespace QtNats;
+
+QmlNatsClient::QmlNatsClient(QObject* parent) : QObject(parent)
 {
 
 }
 
-bool QmlNatsConnection::connectToServer()
+bool QmlNatsClient::connectToServer()
 {
-
+	m_conn = new Client(this);
+	m_conn->connectToServer(QUrl(m_serverUrl));
+	emit statusChanged("Connected");
+	return true;
 }
 
-void QmlNatsConnection::disconnectFromServer()
+void QmlNatsClient::disconnectFromServer()
 {
-
+	delete m_conn;
+	emit statusChanged("Disconnected");
 }
 
-QmlNatsSubscription* QmlNatsConnection::subscribe(const QString& subject)
+QString QmlNatsClient::status() const
 {
-	return nullptr;
+	if (m_conn)
+		return "Connected";
+	else
+		return "Disconnected";
 }
 
-void QmlNatsConnection::publish(const QString& subject, const QString& message)
+QmlNatsSubscription* QmlNatsClient::subscribe(const QString& subject)
 {
+	if (!m_conn)
+		return nullptr;
 
+	Subscription* sub = m_conn->subscribe(subject.toLatin1());
+	return new QmlNatsSubscription(sub, this);
 }
 
-QString QmlNatsConnection::request(const QString& subject, const QString& message)
+void QmlNatsClient::publish(const QString& subject, const QString& message)
 {
-	return QString();
+	if (!m_conn)
+		return;
+
+	m_conn->publish(Message(subject.toLatin1(), message.toLatin1()));
 }
 
-QmlNatsSubscription::QmlNatsSubscription(QtNats::Subscription* s)
+QString QmlNatsClient::request(const QString& subject, const QString& message)
 {
+	if (!m_conn)
+		return "";
 
+	Message out(subject.toLatin1(), message.toLatin1());
+	Message response = m_conn->request(out);
+	return QString::fromLatin1(response.data);
 }
 
-QmlNatsSubscription::~QmlNatsSubscription()
+QmlNatsSubscription::QmlNatsSubscription(QtNats::Subscription* s, QObject* parent):
+	QObject(parent),
+	m_sub(s)
 {
-
+	connect(m_sub, &Subscription::received, this, [this](const Message& message) {
+		emit received(QString::fromLatin1(message.data));
+	});
+	m_sub->setParent(this);
 }
+
 //TODO: error logging ? https://stackoverflow.com/questions/32118682/how-to-report-errors-from-custom-qml-components

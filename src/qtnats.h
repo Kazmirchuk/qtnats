@@ -22,7 +22,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 namespace QtNats {
 
-    Q_NAMESPACE
+    QTNATS_EXPORT Q_NAMESPACE  //we need the "export" directive due to https://bugreports.qt.io/browse/QTBUG-68014
 
     using MessageHeaders = QMultiHash<QByteArray, QByteArray>;
 
@@ -131,16 +131,16 @@ namespace QtNats {
     };
 
 
-    class QTNATS_EXPORT Connection : public QObject
+    class QTNATS_EXPORT Client : public QObject
     {
         Q_OBJECT
-        Q_DISABLE_COPY(Connection)
+        Q_DISABLE_COPY(Client)
         
     public:
-        explicit Connection(QObject* parent = nullptr);
-        ~Connection() noexcept override;
-        Connection(Connection&&) = delete;
-        Connection& operator=(Connection&&) = delete;
+        explicit Client(QObject* parent = nullptr);
+        ~Client() noexcept override;
+        Client(Client&&) = delete;
+        Client& operator=(Client&&) = delete;
         
         void connectToServer(const Options& opts);
         void connectToServer(const QUrl& address);
@@ -191,7 +191,7 @@ namespace QtNats {
         Subscription(QObject* parent) : QObject(parent) {}
 
         natsSubscription* m_sub = nullptr;
-        friend class Connection;
+        friend class Client;
         friend class JetStream;
     };
 
@@ -252,8 +252,8 @@ namespace QtNats {
         void asyncPublish(const Message& msg, qint64 timeout = -1);
         void waitForPublishCompleted(qint64 timeout = -1);
 
-        Subscription* subscribe(const QByteArray& subject, jsSubOptions* subOpts);
-        PullSubscription* pullSubscribe(const QByteArray& subject, const QByteArray& durable, jsSubOptions* subOpts);
+        Subscription* subscribe(const QByteArray& subject, const QByteArray& stream, const QByteArray& consumer);
+        PullSubscription* pullSubscribe(const QByteArray& subject, const QByteArray& stream, const QByteArray& consumer);
 
         jsCtx* getJsContext() const { return m_jsCtx; }
         
@@ -268,7 +268,7 @@ namespace QtNats {
         JsPublishAck doPublish(const Message& msg, jsPubOptions* opts);
         void doAsyncPublish(const Message& msg, jsPubOptions* opts);
 
-        friend class Connection;
+        friend class Client;
     };
 
     

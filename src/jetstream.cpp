@@ -22,12 +22,12 @@ static void jsPubErrHandler(jsCtx*, jsPubAckErr* pae, void* closure)
     emit js->errorOccurred(pae->Err, pae->ErrCode, QString(pae->ErrText), msg);
 }
 
-JetStream* Connection::jetStream(const JsOptions& options)
+JetStream* Client::jetStream(const JsOptions& options)
 {
     JetStream* js = new JetStream(this);
     jsOptions jsOpts;
     jsOptions_Init(&jsOpts);
-    jsOpts.Domain = qPrintable(options.domain);
+    jsOpts.Domain = options.domain.constData();
     jsOpts.Wait = options.timeout;
 
     jsOpts.PublishAsync.ErrHandler = &jsPubErrHandler;
@@ -186,23 +186,32 @@ void JetStream::waitForPublishCompleted(qint64 timeout)
     checkError(s);
 }
 
-Subscription* JetStream::subscribe(const QByteArray& subject, jsSubOptions* subOpts)
+Subscription* JetStream::subscribe(const QByteArray& subject, const QByteArray& stream, const QByteArray& consumer)
 {
-    subOpts->ManualAck = true; // avoid _autoAckCB in cnats internals, because it takes over ownership of delivered messages
+    jsSubOptions subOpts;
+    jsSubOptions_Init(&subOpts);
+    subOpts.Stream = stream.constData();
+    subOpts.Consumer = consumer.constData();
+    subOpts.ManualAck = true; // avoid _autoAckCB in cnats internals, because it takes over ownership of delivered messages
     auto sub = std::unique_ptr<Subscription>(new Subscription(nullptr));
     jsErrCode jsErr;
-    natsStatus s = js_Subscribe(&sub->m_sub, m_jsCtx, subject.constData(), &subscriptionCallback, sub.get(), nullptr, subOpts, &jsErr);
+    natsStatus s = js_Subscribe(&sub->m_sub, m_jsCtx, subject.constData(), &subscriptionCallback, sub.get(), nullptr, &subOpts, &jsErr);
     checkJsError(s, jsErr);
     sub->setParent(this);
     return sub.release();
 }
 
-PullSubscription* JetStream::pullSubscribe(const QByteArray& subject, const QByteArray& durable, jsSubOptions* subOpts)
+PullSubscription* JetStream::pullSubscribe(const QByteArray& subject, const QByteArray& stream, const QByteArray& consumer)
 {
     auto sub = std::unique_ptr<PullSubscription>(new PullSubscription(nullptr));
     jsErrCode jsErr;
-    
-    natsStatus s = js_PullSubscribe(&sub->m_sub, m_jsCtx, qPrintable(subject), qPrintable(durable), nullptr, subOpts, &jsErr);
+ 
+    jsSubOptions subOpts;
+    jsSubOptions_Init(&subOpts);
+    subOpts.Stream = stream.constData();
+    subOpts.Consumer = consumer.constData();
+
+    natsStatus s = js_PullSubscribe(&sub->m_sub, m_jsCtx, subject.constData(), consumer.constData(), nullptr, &subOpts, &jsErr);
     checkJsError(s, jsErr);
     sub->setParent(this);
     return sub.release();

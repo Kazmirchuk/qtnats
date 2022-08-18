@@ -1,11 +1,13 @@
-include_directories(${PROJECT_BINARY_DIR})  # to find qtnats_export.h
 
-#my goodness, this thing generates 7 MSVS projects :o
+add_library(qmlnatsplugin SHARED qmlnatsplugin.cpp qmlnatsplugin.h)
+
 qt_add_qml_module(qmlnatsplugin
     URI NATS
-    VERSION 0.1
+    # FIXME: the version MUST be set to 1.0
+    # otherwise the generated qmlnatsplugin_qmltyperegistrations.cpp registers the NATS module twice, and then loading the plugin fails
+    VERSION 1.0
     PLUGIN_TARGET qmlnatsplugin
-    SOURCES qmlnatsplugin.cpp qmlnatsplugin.h
 )
 
-target_link_libraries(qmlnatsplugin PRIVATE qtnats)
+include_directories(${PROJECT_BINARY_DIR})  # to find qtnats_export.h
+target_link_libraries(qmlnatsplugin PUBLIC qtnats)

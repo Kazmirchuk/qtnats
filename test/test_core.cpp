@@ -58,7 +58,12 @@ void CoreTestCase::cleanupTestCase()
 void CoreTestCase::subscribe()
 {
     try {
-        Connection c;
+        Client c;
+
+        connect(&c, &Client::statusChanged, [](ConnectionStatus s) {
+            cout << "Connection status: " << qPrintable(enumToString(s)) << endl;
+        });
+
         c.connectToServer(QUrl("nats://localhost:4222"));
         auto sub = c.subscribe("test_subject");
         
@@ -89,7 +94,7 @@ void CoreTestCase::request()
 {
     QProcess responder;
     try {
-        Connection c;
+        Client c;
         c.connectToServer(QUrl("nats://localhost:4222"));
         
         responder.start("nats", QStringList() << "reply" << "service" << "bla");
@@ -116,7 +121,7 @@ void CoreTestCase::asyncRequest()
         responder.waitForStarted();
         QTest::qWait(1000);
         
-        Connection c;
+        Client c;
         c.connectToServer(QUrl("nats://localhost:4222"));
         QList<QFuture<Message>> futuresList;
         for (int i = 0; i < 100; i++) {
