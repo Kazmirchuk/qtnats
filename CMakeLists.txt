@@ -6,7 +6,6 @@ include(CMakePrintHelpers)
 include(FetchContent)
 include(GenerateExportHeader)
 
-option(USE_QT6 "Use Qt6 instead of Qt5" OFF)
 option(BUILD_QMLNATS "Build the QML NATS plugin (Qt6-only)" OFF)
 
 set(default_build_type "Release")
@@ -16,13 +15,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)  # to find qtnats_export.h
 
-if(USE_QT6)
-    find_package(Qt6 COMPONENTS Core Test Qml Quick REQUIRED)
-else()
-    find_package(Qt5 COMPONENTS Core Test Qml Quick REQUIRED)
-endif()
-
-# find_package(Qt COMPONENTS Core Test REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Core Test Qml Quick REQUIRED)
+message("Using Qt version ${QT_VERSION}")
 
 # show that we're git-cloning cnats
 set(FETCHCONTENT_QUIET FALSE)
