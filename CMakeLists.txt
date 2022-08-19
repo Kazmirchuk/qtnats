@@ -15,7 +15,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)  # to find qtnats_export.h
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Core Test Qml Quick REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Core REQUIRED)
+# according to https://gitlab.kitware.com/cmake/cmake/-/issues/20843 I need 2 find_package's to detect Qt5/Qt6
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core Test Qml Quick REQUIRED)
 message("Using Qt version ${QT_VERSION}")
 
 # show that we're git-cloning cnats
@@ -58,7 +60,10 @@ add_executable(test_jetstream test/test_jetstream.cpp)
 add_test(NAME test_jetstream COMMAND test_jetstream)
 target_link_libraries(test_jetstream PRIVATE qtnats Qt::Test)
 
-if(USE_QT6 AND BUILD_QMLNATS)
-    add_subdirectory(qml)
+if(BUILD_QMLNATS)
+    if(${QT_VERSION_MAJOR} EQUAL 6)
+        add_subdirectory(qml)
+    else()
+        message(FATAL_ERROR "NATS QML is supported only with Qt6")
+    endif()
 endif()
-

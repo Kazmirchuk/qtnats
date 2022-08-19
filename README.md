@@ -101,10 +101,10 @@ function addMessage(payload)
 You can find a full example in `demo.qml`. You can run it as follows:
 
 1. Build the QML plugin
-2. Create a folder for the plugin, like "NATS", and copy the plugin DLL/SO, generated qmldir and qmlnatsplugin.qmltypes files
+2. Create a folder for the plugin called "NATS", and copy the plugin DLL/SO, generated qmldir and qmlnatsplugin.qmltypes files
 3. Run it using the `qml` tool from Qt:
 ```
-qml -I <path to NATS folder> --verbose qml\demo.qml
+qml -I <folder one level above NATS folder> --verbose qml\demo.qml
 ```
 
 # Running tests
