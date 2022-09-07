@@ -173,10 +173,11 @@ static void errorHandler(natsConnection* /*nc*/, natsSubscription* /*subscriptio
     emit c->errorOccurred(err, getNatsErrorText(err));
 }
 
-static void closedConnectionHandler(natsConnection* /*nc*/, void *closure) {
+void Client::closedConnectionHandler(natsConnection* /*nc*/, void *closure) {
     Client* c = reinterpret_cast<Client*>(closure);
-    //can ask for last error here
+    //can ask for last error here?
     emit c->statusChanged(ConnectionStatus::Closed);
+    c->semaphore.release();
 }
 
 static void reconnectedHandler(natsConnection* /*nc*/, void *closure) {
@@ -190,7 +191,8 @@ static void disconnectedHandler(natsConnection* /*nc*/, void *closure) {
 }
 
 Client::Client(QObject* parent):
-    QObject(parent)
+    QObject(parent),
+    semaphore(1)
 {
     int cpuCoresCount = QThread::idealThreadCount(); //this function may fail, thus the check
     if (cpuCoresCount >= 2) {
@@ -205,7 +207,10 @@ Client::~Client()
 
 void Client::connectToServer(const Options& opts)
 {
+    using NatsOptsPtr = std::unique_ptr<natsOptions, decltype(&natsOptions_Destroy)>;
     natsOptions* nats_opts = buildNatsOptions(opts);
+    NatsOptsPtr optsPtr(nats_opts, &natsOptions_Destroy);
+
     //don't create a thread for each subscription, since we may have a lot of subscriptions
     //number of threads in the pool is set by nats_SetMessageDeliveryPoolSize above
     natsOptions_UseGlobalMessageDelivery(nats_opts, true);
@@ -233,9 +238,11 @@ void Client::close() noexcept
     if (!m_conn) {
         return;
     }
+    //sync this thread with closedConnectionHandler otherwise I get a crash when trying to emit c->statusChanged(ConnectionStatus::Closed);
+    semaphore.acquire();
     natsConnection_Close(m_conn);
-    //TODO sync thread with closedConnectionHandler otherwise I get a crash when trying to emit c->statusChanged(ConnectionStatus::Closed);
-    QThread::msleep(200);
+    semaphore.acquire(); // here we'll wait until the callback is done
+    semaphore.release();
     natsConnection_Destroy(m_conn);
     m_conn = nullptr;
 }

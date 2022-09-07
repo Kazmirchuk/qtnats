@@ -5,7 +5,9 @@
 *.dylib
 
 # Folders
-build*/
+.vs/
+build/
+build_qt6/
 cmake-build*/
 install/
 html/

@@ -27,7 +27,7 @@ Remember to specify an appropriate generator if it is not detected automatically
 `cmake` options:
 - BUILD_QMLNATS: build the QML plugin too; supported only for Qt6 (OFF by default)
 
-cmake will automatically pull `cnats` from GitHub, before generating the project.
+cmake will automatically clone `cnats` from GitHub, before generating the project.
 
 # Examples
 
