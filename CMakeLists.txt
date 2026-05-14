@@ -123,6 +123,8 @@ endif()
 # integration tests (these spin up nats server and nats client)
 set(BUILD_QT_NATS_INTEGRATION_TESTING OFF CACHE BOOL "Build qtnats integration tests")
 if (BUILD_QT_NATS_INTEGRATION_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+
     add_executable(test_core test/test_core.cpp)
     add_test(NAME test_core COMMAND test_core)
     target_link_libraries(test_core PRIVATE qtnats Qt::Test)

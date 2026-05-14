@@ -440,6 +440,12 @@ void JetStreamTestCase::readWriteObject() {
         {
             QVERIFY(objectStore->getBytes(asBytes, {}) == testString);
 
+            const auto storeInfo = objectStore->getInfo(asBytes, {});
+            QCOMPARE(storeInfo.meta.name, QString{asBytes});
+            QCOMPARE(storeInfo.bucket, QString{bucket});
+            QCOMPARE(storeInfo.size, static_cast<uint64_t>(strlen(testString)));
+            QVERIFY(!storeInfo.deleted);
+
             natsCli.start("nats", QStringList() << "object" << "get" << bucket << asBytes << "--force");
             QVERIFY2(natsCli.waitForFinished(), qPrintable(natsCli.errorString()));
             QVERIFY2(natsCli.exitCode() == 0, "nats CLI failed (see output above)");
